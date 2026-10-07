@@ -1,0 +1,44 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      POS_API_KEY: ${POS_API_KEY:?POS_API_KEY must be set in .env}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?ADMIN_API_KEY must be set in .env}
+      REGISTER_ORIGIN: ${REGISTER_ORIGIN:-}
+      SQLITE_PATH: /data/booth-sales.sqlite
+    init: true
+    restart: unless-stopped
+    volumes:
+      - booth_data:/data
+    networks:
+      - booth_internal
+
+  proxy:
+    image: caddy:2.10-alpine
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - booth_internal
+
+networks:
+  booth_internal:
+
+volumes:
+  booth_data:
+  caddy_data:
+  caddy_config:
