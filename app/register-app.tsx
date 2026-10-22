@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Product } from "@/lib/types";
 
 type Cart = Record<string, number>;
@@ -44,8 +44,12 @@ function categoryIcon(category: string) {
   return ShoppingBasket;
 }
 
-export function RegisterApp({ products }: { products: Product[] }) {
-  const categories = ["すべて", ...new Set(products.map((item) => item.category))];
+export function RegisterApp({
+  products: initialProducts,
+}: {
+  products: Product[];
+}) {
+  const [products, setProducts] = useState<Product[]>(initialProducts);
   const [category, setCategory] = useState("すべて");
   const [cart, setCart] = useState<Cart>({});
   const [config, setConfig] = useState<RegisterConfig>(DEFAULT_CONFIG);
@@ -60,6 +64,34 @@ export function RegisterApp({ products }: { products: Product[] }) {
     id: string;
     total: number;
   } | null>(null);
+
+  const categories = [
+    "すべて",
+    ...new Set(products.map((item) => item.category)),
+  ];
+  // 選んでいたカテゴリーの商品が全部なくなったら「すべて」に戻す
+  const activeCategory = categories.includes(category) ? category : "すべて";
+
+  // メニューをサーバーから取り直す。取得できたら商品一覧を返し、失敗なら null
+  const refreshProducts = useCallback(async (): Promise<Product[] | null> => {
+    try {
+      const response = await fetch("/api/products", { cache: "no-store" });
+      if (!response.ok) return null;
+      const body = (await response.json()) as { products: Product[] };
+      setProducts(body.products);
+      // 販売終了した商品は注文からも外す
+      const ids = new Set(body.products.map((item) => item.id));
+      setCart((current) =>
+        Object.fromEntries(
+          Object.entries(current).filter(([id]) => ids.has(id)),
+        ),
+      );
+      return body.products;
+    } catch {
+      // 通信できないときは今のメニューのまま使う
+      return null;
+    }
+  }, []);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("booth-register-config");
@@ -80,6 +112,19 @@ export function RegisterApp({ products }: { products: Product[] }) {
     };
   }, []);
 
+  // 30秒ごと、および画面に戻ってきたときにメニューを取り直す
+  useEffect(() => {
+    const timer = window.setInterval(() => void refreshProducts(), 30000);
+    const handleVisible = () => {
+      if (document.visibilityState === "visible") void refreshProducts();
+    };
+    document.addEventListener("visibilitychange", handleVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", handleVisible);
+    };
+  }, [refreshProducts]);
+
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(null), 5000);
@@ -87,9 +132,9 @@ export function RegisterApp({ products }: { products: Product[] }) {
   }, [notice]);
 
   const visibleProducts =
-    category === "すべて"
+    activeCategory === "すべて"
       ? products
-      : products.filter((product) => product.category === category);
+      : products.filter((product) => product.category === activeCategory);
   const cartLines = useMemo(
     () =>
       products
@@ -126,7 +171,7 @@ export function RegisterApp({ products }: { products: Product[] }) {
     setNotice({ kind: "success", message: "端末設定を保存しました。" });
   }
 
-  function beginCheckout() {
+  async function beginCheckout() {
     if (!config.apiKey || !config.serverUrl) {
       setDraftConfig({
         serverUrl: config.serverUrl || window.location.origin,
@@ -135,6 +180,20 @@ export function RegisterApp({ products }: { products: Product[] }) {
       setSettingsOpen(true);
       setNotice({ kind: "error", message: "先に接続設定を完了してください。" });
       return;
+    }
+
+    // 会計の前にメニューを取り直し、販売終了した商品が注文に残っていないか確認する
+    const latest = await refreshProducts();
+    if (latest) {
+      const ids = new Set(latest.map((item) => item.id));
+      const removed = Object.keys(cart).some((id) => !ids.has(id));
+      if (removed) {
+        setNotice({
+          kind: "error",
+          message: "販売終了した商品を注文から外しました。内容を確認してください。",
+        });
+        return;
+      }
     }
     setCheckoutOpen(true);
   }
@@ -185,11 +244,11 @@ export function RegisterApp({ products }: { products: Product[] }) {
       <header className="register-header">
         <div className="brand-lockup">
           <span className="brand-mark" aria-hidden="true">
-            K
+            L
           </span>
           <span>
-            <strong>KINARI</strong>
-            <small>BOOTH REGISTER</small>
+            <strong>LX-SYS</strong>
+            <small>いわふぇす　レジシステム</small>
           </span>
         </div>
         <div className="register-header-actions">
@@ -242,8 +301,8 @@ export function RegisterApp({ products }: { products: Product[] }) {
                 key={item}
                 type="button"
                 role="tab"
-                aria-selected={category === item}
-                className={category === item ? "active" : ""}
+                aria-selected={activeCategory === item}
+                className={activeCategory === item ? "active" : ""}
                 onClick={() => setCategory(item)}
               >
                 {item}

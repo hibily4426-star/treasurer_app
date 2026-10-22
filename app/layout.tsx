@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "KINARI BOOTH REGISTER",
+  title: "LX-SYS  いわふぇす　レジシステム",
   description: "ブース売上管理・レジシステム",
-  applicationName: "KINARI BOOTH",
+  applicationName: "LX-SYS いわふぇす　レジシステム",
 };
 
 export const viewport: Viewport = {

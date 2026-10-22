@@ -446,3 +446,63 @@ export function getDashboard(): DashboardData {
     cancellations: mapSales(cancellationRows, linesBySale),
   };
 }
+const ACCENT_COLORS = [
+  "#D95D39",
+  "#2D7D74",
+  "#C99A16",
+  "#A8553A",
+  "#3F6F8F",
+  "#8E5F99",
+];
+
+export function addProduct(input: {
+  name: string;
+  shortName: string;
+  category: string;
+  price: number;
+}): Product {
+  const database = getDatabase();
+  const id = randomUUID();
+  const { maxOrder, count } = database
+    .prepare(
+      "SELECT COALESCE(MAX(sort_order), 0) AS maxOrder, COUNT(*) AS count FROM products",
+    )
+    .get() as { maxOrder: number; count: number };
+  const sortOrder = maxOrder + 10;
+  const accent = ACCENT_COLORS[count % ACCENT_COLORS.length];
+
+  database
+    .prepare(
+      `INSERT INTO products
+        (id, name, short_name, category, price, accent, sort_order)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      id,
+      input.name,
+      input.shortName,
+      input.category,
+      input.price,
+      accent,
+      sortOrder,
+    );
+
+  return {
+    id,
+    name: input.name,
+    shortName: input.shortName,
+    category: input.category,
+    price: input.price,
+    accent,
+    sortOrder,
+  };
+}
+
+// 行は消さず、メニューから外す(過去の売上データを守るため)
+export function deactivateProduct(id: string) {
+  const result = getDatabase()
+    .prepare("UPDATE products SET active = 0 WHERE id = ? AND active = 1")
+    .run(id);
+  return result.changes === 1;
+}
+

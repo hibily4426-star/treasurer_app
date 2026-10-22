@@ -13,20 +13,23 @@ import {
   LogOut,
   Menu,
   PackageOpen,
+  Plus,
   ReceiptText,
   RefreshCw,
   RotateCcw,
   Search,
   Store,
+  Trash2,
   TrendingUp,
+  Utensils,
   WalletCards,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { DashboardData, Sale } from "@/lib/types";
+import type { DashboardData, Product, Sale } from "@/lib/types";
 
-type View = "overview" | "sales" | "products" | "hours" | "refunds";
+type View = "overview" | "sales" | "products" | "menu" | "hours" | "refunds";
 
 const VIEWS: Array<{
   id: View;
@@ -36,6 +39,7 @@ const VIEWS: Array<{
   { id: "overview", label: "概要", icon: LayoutDashboard },
   { id: "sales", label: "今日の売上", icon: ReceiptText },
   { id: "products", label: "商品別売上", icon: Boxes },
+  { id: "menu", label: "メニュー管理", icon: Utensils },
   { id: "hours", label: "時間帯別売上", icon: BarChart3 },
   { id: "refunds", label: "返金履歴", icon: RotateCcw },
 ];
@@ -160,6 +164,14 @@ export function AdminDashboard() {
   const [cancellingSale, setCancellingSale] = useState<Sale | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [submittingCancel, setSubmittingCancel] = useState(false);
+  const [menuProducts, setMenuProducts] = useState<Product[]>([]);
+  const [menuLoading, setMenuLoading] = useState(false);
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+  const [newShortName, setNewShortName] = useState("");
+  const [newCategory, setNewCategory] = useState("");
+  const [newPrice, setNewPrice] = useState("");
+  const [addingProduct, setAddingProduct] = useState(false);
 
   const loadDashboard = useCallback(async (key: string, quiet = false) => {
     if (!quiet) setLoading(true);
@@ -185,6 +197,29 @@ export function AdminDashboard() {
     }
   }, []);
 
+  const loadMenu = useCallback(async () => {
+    setMenuLoading(true);
+    try {
+      const response = await fetch("/api/products", { cache: "no-store" });
+      const body = (await response.json()) as {
+        products?: Product[];
+        error?: string;
+      };
+      if (!response.ok || !body.products) {
+        throw new Error(body.error || "メニューを読み込めませんでした。");
+      }
+      setMenuProducts(body.products);
+    } catch (menuError) {
+      setError(
+        menuError instanceof Error
+          ? menuError.message
+          : "メニューを読み込めませんでした。",
+      );
+    } finally {
+      setMenuLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const stored = window.sessionStorage.getItem("booth-admin-key");
     if (!stored) return;
@@ -204,6 +239,13 @@ export function AdminDashboard() {
     }, 30_000);
     return () => window.clearInterval(timer);
   }, [adminKey, loadDashboard]);
+
+  // メニュー管理を開いたときにメニューを読み込む
+  useEffect(() => {
+    if (!adminKey || view !== "menu") return;
+    const frame = window.requestAnimationFrame(() => void loadMenu());
+    return () => window.cancelAnimationFrame(frame);
+  }, [adminKey, view, loadMenu]);
 
   const filteredSales = useMemo(() => {
     if (!data) return [];
@@ -269,17 +311,79 @@ export function AdminDashboard() {
     }
   }
 
+  async function submitNewProduct(event: React.FormEvent) {
+    event.preventDefault();
+    setAddingProduct(true);
+    try {
+      const response = await fetch("/api/admin/products", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Admin-Key": adminKey,
+        },
+        body: JSON.stringify({
+          name: newName,
+          shortName: newShortName,
+          category: newCategory,
+          price: Number(newPrice),
+        }),
+      });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(body.error || "追加できませんでした。");
+      setNewName("");
+      setNewShortName("");
+      setNewPrice("");
+      setError("");
+      await loadMenu();
+    } catch (addError) {
+      setError(
+        addError instanceof Error ? addError.message : "追加できませんでした。",
+      );
+    } finally {
+      setAddingProduct(false);
+    }
+  }
+
+  async function removeProduct(product: Product) {
+    if (
+      !window.confirm(
+        `「${product.name}」をメニューから外しますか?\n過去の売上データは残ります。`,
+      )
+    ) {
+      return;
+    }
+    setDeletingProductId(product.id);
+    try {
+      const response = await fetch(`/api/admin/products/${product.id}`, {
+        method: "DELETE",
+        headers: { "X-Admin-Key": adminKey },
+      });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(body.error || "削除できませんでした。");
+      setError("");
+      await loadMenu();
+    } catch (removeError) {
+      setError(
+        removeError instanceof Error
+          ? removeError.message
+          : "削除できませんでした。",
+      );
+    } finally {
+      setDeletingProductId(null);
+    }
+  }
+
   if (!adminKey || !data) {
     return (
       <main className="admin-login-shell">
         <section className="admin-login-panel">
           <Link className="brand-lockup" href="/">
             <span className="brand-mark" aria-hidden="true">
-              K
+              L
             </span>
             <span>
-              <strong>KINARI</strong>
-              <small>BOOTH ADMIN</small>
+              <strong>LX-SYS</strong>
+              <small>いわふぇす レジシステム</small>
             </span>
           </Link>
           <div className="login-copy">
@@ -340,6 +444,13 @@ export function AdminDashboard() {
     (row) => row.hour >= 7 && row.hour <= 21,
   );
   const maxHourlyAmount = Math.max(1, ...activeHours.map((item) => item.amount));
+  const menuCategories = [...new Set(menuProducts.map((item) => item.category))];
+  const canAddProduct =
+    newName.trim() !== "" &&
+    newShortName.trim() !== "" &&
+    newCategory.trim() !== "" &&
+    newPrice !== "" &&
+    Number(newPrice) >= 0;
 
   return (
     <div className="admin-shell">
@@ -347,11 +458,11 @@ export function AdminDashboard() {
         <div className="admin-sidebar-top">
           <Link className="brand-lockup inverse" href="/">
             <span className="brand-mark" aria-hidden="true">
-              K
+              L
             </span>
             <span>
-              <strong>KINARI</strong>
-              <small>BOOTH ADMIN</small>
+              <strong>LX-SYS</strong>
+              <small>いわふぇす レジシステム</small>
             </span>
           </Link>
           <button
@@ -628,6 +739,131 @@ export function AdminDashboard() {
                 ))}
               </div>
             </section>
+          )}
+
+          {view === "menu" && (
+            <>
+              <section className="admin-section">
+                <div className="admin-section-heading">
+                  <div>
+                    <p className="eyebrow">ADD ITEM</p>
+                    <h2>メニューを追加</h2>
+                  </div>
+                </div>
+                <form onSubmit={submitNewProduct}>
+                  <label className="field">
+                    <span>商品名</span>
+                    <input
+                      value={newName}
+                      maxLength={50}
+                      placeholder="例: アイスティー"
+                      onChange={(event) => setNewName(event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>略称(レジのボタンに表示・10文字まで)</span>
+                    <input
+                      value={newShortName}
+                      maxLength={10}
+                      placeholder="例: アイス"
+                      onChange={(event) => setNewShortName(event.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>カテゴリー</span>
+                    <input
+                      value={newCategory}
+                      maxLength={30}
+                      list="menu-categories"
+                      placeholder="例: ドリンク"
+                      onChange={(event) => setNewCategory(event.target.value)}
+                    />
+                    <datalist id="menu-categories">
+                      {menuCategories.map((item) => (
+                        <option key={item} value={item} />
+                      ))}
+                    </datalist>
+                  </label>
+                  <label className="field">
+                    <span>価格(円)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      inputMode="numeric"
+                      value={newPrice}
+                      placeholder="例: 450"
+                      onChange={(event) => setNewPrice(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    className="primary-action"
+                    type="submit"
+                    disabled={!canAddProduct || addingProduct}
+                  >
+                    {addingProduct ? <span className="spinner" /> : <Plus size={18} />}
+                    {addingProduct ? "追加中" : "メニューに追加"}
+                  </button>
+                </form>
+              </section>
+
+              <section className="admin-section">
+                <div className="admin-section-heading">
+                  <div>
+                    <p className="eyebrow">CURRENT MENU</p>
+                    <h2>現在のメニュー</h2>
+                  </div>
+                  <span className="section-meta">{menuProducts.length} 品</span>
+                </div>
+                {menuLoading && menuProducts.length === 0 ? (
+                  <div className="admin-empty">
+                    <span className="spinner" />
+                  </div>
+                ) : menuProducts.length === 0 ? (
+                  <div className="admin-empty">
+                    <PackageOpen size={30} />
+                    <strong>メニューがありません</strong>
+                  </div>
+                ) : (
+                  <div className="table-scroll">
+                    <table className="sales-table">
+                      <thead>
+                        <tr>
+                          <th>商品名</th>
+                          <th>略称</th>
+                          <th>カテゴリー</th>
+                          <th className="number-cell">価格</th>
+                          <th aria-label="操作" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {menuProducts.map((product) => (
+                          <tr key={product.id}>
+                            <td>{product.name}</td>
+                            <td>{product.shortName}</td>
+                            <td>{product.category}</td>
+                            <td className="number-cell">
+                              <strong>{formatYen(product.price)}</strong>
+                            </td>
+                            <td className="action-cell">
+                              <button
+                                className="table-action"
+                                type="button"
+                                disabled={deletingProductId === product.id}
+                                onClick={() => void removeProduct(product)}
+                              >
+                                <Trash2 size={15} />
+                                削除
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            </>
           )}
 
           {view === "hours" && (
